@@ -1,0 +1,155 @@
+name: Build ChepGame Store PS4 PKG
+
+on:
+  workflow_dispatch:
+    inputs:
+      catalog_url:
+        description: 'URL catalog PC LAN hoặc HTTPS, nhập được lại ngay trên PS4'
+        required: true
+        default: 'http://192.168.1.6:8099/orbis/catalog.json'
+        type: string
+
+permissions:
+  contents: read
+
+jobs:
+  build-ps4:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 55
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Fetch verified TrueType renderer header
+        run: python3 fetch_stb_header.py
+      - name: Prepare ChepGame PS4 native sources
+        env:
+          STORE_CATALOG_URL: ${{ inputs.catalog_url }}
+        run: |
+          # Remove old generated source if it was accidentally committed to the repository.
+          rm -rf ChepGameStore-PS4
+          python3 prepare_native.py --out ChepGameStore-PS4 --catalog-url "$STORE_CATALOG_URL"
+          python3 ChepGameStore-PS4/scripts/validate_catalog.py ChepGameStore-PS4/catalog/catalog.json
+          test -f ChepGameStore-PS4/LICENSE
+          python3 kiem_tra_giao_dien.py ChepGameStore-PS4
+      - name: Install font coverage test helper
+        run: python3 -m pip install --disable-pip-version-check fonttools==4.60.1
+      - name: Test optimized downloader, unicode font and safe header fetch
+        run: |
+          python3 -m unittest tests.test_download_stable_v043 tests.test_fast_download_v042 tests.test_stb_fetch_hotfix tests.test_systemfont_v039 tests.test_download_audit_v044 -v
+      - name: Verify PKG output checks (offline unit tests)
+        run: python3 -m unittest tests.test_pkg_output_contract -v
+      - name: Verify download-only design and resume policy
+        run: |
+          grep -Fq 'chepgame_resume_policy.hpp' ChepGameStore-PS4/src/http_client.cpp
+          grep -Fq 'overlap_checked' ChepGameStore-PS4/src/http_client.cpp
+          grep -Fq 'sceHttpGetResponseContentLength(handles.req' ChepGameStore-PS4/src/http_client.cpp
+          grep -Fq 'completed==expected_size' ChepGameStore-PS4/src/http_client.cpp
+          grep -Fq 'chepgame_download_click' ChepGameStore-PS4/src/main.cpp
+          grep -Fq 'ensure_writable_dir' ChepGameStore-PS4/src/main.cpp
+          grep -Fq 'chepgame_download_fs.hpp' ChepGameStore-PS4/src/main.cpp
+          grep -Fq 'download_finished' ChepGameStore-PS4/src/main.cpp
+          grep -Fq 'tai_pkg.log' ChepGameStore-PS4/src/main.cpp
+          grep -Fq 'if (false && remote_install' ChepGameStore-PS4/src/main.cpp
+          grep -Fq 'Tải hoàn tất – PKG sẵn sàng' ChepGameStore-PS4/src/main.cpp
+      - name: Check v0.4.5 HDD filesystem probe C++
+        run: |
+          g++ -std=c++11 -Wall -Wextra -Werror -I. tests/test_download_fs_v044.cpp -o /tmp/chepgame-fs-test
+          /tmp/chepgame-fs-test
+      - name: Check transfer speed and ETA C++
+        run: |
+          g++ -std=c++11 -Wall -Wextra -Werror -I. tests/test_transfer_meter.cpp -o /tmp/chepgame-transfer-test
+          /tmp/chepgame-transfer-test
+      - name: Install LLVM 18
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y --no-install-recommends clang-18 lld-18
+      - name: Download OpenOrbis PS4 Toolchain v0.5.4
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          SDK_URL=$(gh api repos/OpenOrbis/OpenOrbis-PS4-Toolchain/releases/tags/v0.5.4 \
+            --jq '.assets[] | select(.name == "toolchain-llvm-18.tar.gz") | .browser_download_url')
+          test -n "$SDK_URL"
+          gh release download v0.5.4 -R OpenOrbis/OpenOrbis-PS4-Toolchain -p toolchain-llvm-18.tar.gz -O openorbis-sdk.tar.gz
+          mkdir -p .openorbis-sdk
+          tar -xzf openorbis-sdk.tar.gz -C .openorbis-sdk
+          LINK_X=$(find "$GITHUB_WORKSPACE/.openorbis-sdk" -type f -name link.x -print -quit)
+          test -n "$LINK_X"
+          TOOLCHAIN_ROOT=$(dirname "$LINK_X")
+          chmod +x "$TOOLCHAIN_ROOT"/bin/linux/*
+          test -x "$TOOLCHAIN_ROOT/bin/linux/PkgTool.Core"
+          test -f "$TOOLCHAIN_ROOT/src/modules/right.sprx"
+          echo "TOOLCHAIN_ROOT=$TOOLCHAIN_ROOT" >> "$GITHUB_ENV"
+      - name: Check TrueType renderer with PS4 SDK
+        working-directory: ChepGameStore-PS4
+        run: |
+          clang++-18 --target=x86_64-pc-freebsd12-elf -fPIC -funwind-tables -DORBIS -D_GNU_SOURCE \
+            -isysroot "$TOOLCHAIN_ROOT" -isystem "$TOOLCHAIN_ROOT/include" \
+            -std=c++11 -isystem "$TOOLCHAIN_ROOT/include/c++/v1" \
+            -fsyntax-only src/pixel_font.cpp
+          clang++-18 --target=x86_64-pc-freebsd12-elf -fPIC -funwind-tables -DORBIS -D_GNU_SOURCE \
+            -isysroot "$TOOLCHAIN_ROOT" -isystem "$TOOLCHAIN_ROOT/include" \
+            -std=c++11 -isystem "$TOOLCHAIN_ROOT/include/c++/v1" \
+            -fsyntax-only src/http_client.cpp
+          clang++-18 --target=x86_64-pc-freebsd12-elf -fPIC -funwind-tables -DORBIS -D_GNU_SOURCE \
+            -isysroot "$TOOLCHAIN_ROOT" -isystem "$TOOLCHAIN_ROOT/include" \
+            -std=c++11 -isystem "$TOOLCHAIN_ROOT/include/c++/v1" \
+            -fsyntax-only src/main.cpp
+      - name: Compile PS4 ELF and EBOOT
+        working-directory: ChepGameStore-PS4
+        run: |
+          export OO_PS4_TOOLCHAIN="$TOOLCHAIN_ROOT"
+          # Kiem tra truc tiep file C++ duoc sinh ra tu prepare_native.py.
+          clang++-18 --target=x86_64-pc-freebsd12-elf -fPIC -funwind-tables -DORBIS -D_GNU_SOURCE \
+            -isysroot "$TOOLCHAIN_ROOT" -isystem "$TOOLCHAIN_ROOT/include" \
+            -std=c++11 -isystem "$TOOLCHAIN_ROOT/include/c++/v1" \
+            -fsyntax-only src/chepgame_direct_install.cpp
+          grep -Fq 'sceSystemServiceLoadExec("exit", nullptr)' src/main.cpp
+          grep -Fq 'chepgame_join_worker();' src/main.cpp
+          grep -Fq 'sceBgftServiceDownloadGetProgress' src/chepgame_direct_install.cpp
+          grep -Fq -- '-lSceSystemService' Makefile
+          make CC=clang-18 CXX=clang++-18 LD=ld.lld-18 eboot.bin
+          test -s eboot.bin
+      - name: Package standalone PS4 homebrew PKG
+        working-directory: ChepGameStore-PS4
+        run: |
+          chmod -R a+rwX "$GITHUB_WORKSPACE"
+          docker run --rm --user 0:0 \
+            -e OO_PS4_TOOLCHAIN=/opt/openorbis \
+            -v "$GITHUB_WORKSPACE:/work" \
+            -v "$TOOLCHAIN_ROOT:/opt/openorbis" \
+            -w /work/ChepGameStore-PS4 ubuntu:20.04 bash -euc '
+              export DEBIAN_FRONTEND=noninteractive
+              apt-get update -qq
+              apt-get install -y --no-install-recommends make libicu66 libssl1.1 ca-certificates python3
+              make IV0000-CHEP00001_00-CHEPGAMESTORE001.pkg
+            '
+          test -s IV0000-CHEP00001_00-CHEPGAMESTORE001.pkg
+          python3 ../verify_ps4_pkg.py \
+            --pkg IV0000-CHEP00001_00-CHEPGAMESTORE001.pkg \
+            --gp4 pkg.gp4 --sfo sce_sys/param.sfo \
+            --title-id CHEP00001 --content-id IV0000-CHEP00001_00-CHEPGAMESTORE001
+          cp IV0000-CHEP00001_00-CHEPGAMESTORE001.pkg ../ChepGameStore-PS4-v0.4.5.pkg
+          sha256sum ../ChepGameStore-PS4-v0.4.5.pkg > ../ChepGameStore-PS4-v0.4.5.pkg.sha256
+      - name: Upload PKG artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ChepGame-Store-PS4-v0.4.5-PKG
+          path: |
+            ChepGameStore-PS4-v0.4.5.pkg
+            ChepGameStore-PS4-v0.4.5.pkg.sha256
+          if-no-files-found: error
+      - name: Upload logs on failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: chepgame-build-source-diagnostics
+          path: |
+            ChepGameStore-PS4/CHEPGAME_INFO.txt
+            ChepGameStore-PS4/Makefile
+            ChepGameStore-PS4/pkg.gp4
+            ChepGameStore-PS4/sce_sys/param.sfo
+          if-no-files-found: ignore

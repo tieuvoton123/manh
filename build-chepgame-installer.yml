@@ -1,0 +1,130 @@
+name: Build ChepGame PKG Installer (Standalone PS4)
+
+on:
+  workflow_dispatch:
+    inputs:
+      diagnostic_without_jbc:
+        description: 'Diagnostic-only build WITHOUT installer privileges (cannot install PKGs).'
+        required: false
+        default: false
+        type: boolean
+permissions:
+  contents: read
+jobs:
+  installer:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 55
+    env:
+      DIAGNOSTIC_ONLY: ${{ inputs.diagnostic_without_jbc && '1' || '0' }}
+    defaults:
+      run:
+        working-directory: ChepGame-Installer
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Preflight JBC (download when missing, never silently switch to diagnostic)
+        run: |
+          set -euo pipefail
+          test -s src/main.cpp
+          test -s src/glyph_data.inc
+          test -s assets/icon0.png
+          if [ "$DIAGNOSTIC_ONLY" = "1" ]; then
+            python3 fetch_jbc.py --diagnostic-only
+            echo '### ChepGame Installer – DIAGNOSTIC mode (no install capability)' >> "$GITHUB_STEP_SUMMARY"
+          else
+            python3 fetch_jbc.py
+            test -s assets/libjbc.sprx || { echo 'Missing JBC after fetch' >&2; exit 1; }
+            sha256sum assets/libjbc.sprx
+            echo '### ChepGame Installer – JBC included (runtime compatibility unverified)' >> "$GITHUB_STEP_SUMMARY"
+          fi
+      - name: Test PKG scanner and source contract
+        run: |
+          python3 -m unittest discover -s tests -v
+          python3 -m unittest discover -s ../tests -p test_pkg_output_contract.py -v
+      - name: Install LLVM 18
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y --no-install-recommends clang-18 lld-18
+      - name: Install OpenOrbis PS4 Toolchain v0.5.4
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          gh release download v0.5.4 -R OpenOrbis/OpenOrbis-PS4-Toolchain -p toolchain-llvm-18.tar.gz -O ../openorbis-installer.tar.gz
+          mkdir -p ../.openorbis-installer
+          tar -xzf ../openorbis-installer.tar.gz -C ../.openorbis-installer
+          LINK_X=$(find "$GITHUB_WORKSPACE/.openorbis-installer" -type f -name link.x -print -quit)
+          test -n "$LINK_X"
+          TOOLCHAIN_ROOT=$(dirname "$LINK_X")
+          chmod +x "$TOOLCHAIN_ROOT"/bin/linux/*
+          test -x "$TOOLCHAIN_ROOT/bin/linux/PkgTool.Core"
+          echo "TOOLCHAIN_ROOT=$TOOLCHAIN_ROOT" >> "$GITHUB_ENV"
+      - name: Check native C++ with real OpenOrbis SDK
+        run: |
+          set -euo pipefail
+          for file in src/*.cpp; do
+            clang++-18 --target=x86_64-pc-freebsd12-elf -fPIC -funwind-tables \
+              -DORBIS -D_GNU_SOURCE -isysroot "$TOOLCHAIN_ROOT" \
+              -isystem "$TOOLCHAIN_ROOT/include" -std=c++11 \
+              -isystem "$TOOLCHAIN_ROOT/include/c++/v1" -I src -fsyntax-only "$file"
+          done
+      - name: Compile PS4 ELF and EBOOT
+        run: |
+          export OO_PS4_TOOLCHAIN="$TOOLCHAIN_ROOT"
+          make CC=clang-18 CXX=clang++-18 LD=ld.lld-18 eboot.bin
+          test -s eboot.bin
+      - name: Build PKG with original SDK packaging tools
+        run: |
+          chmod -R a+rwX "$GITHUB_WORKSPACE"
+          docker run --rm --user 0:0 \
+            -e OO_PS4_TOOLCHAIN=/opt/openorbis \
+            -e DIAGNOSTIC_ONLY="$DIAGNOSTIC_ONLY" \
+            -v "$GITHUB_WORKSPACE:/work" \
+            -v "$TOOLCHAIN_ROOT:/opt/openorbis" \
+            -w /work/ChepGame-Installer ubuntu:20.04 bash -euc '
+              export DEBIAN_FRONTEND=noninteractive
+              apt-get update -qq
+              apt-get install -y --no-install-recommends make libicu66 libssl1.1 ca-certificates python3
+              make IV0000-CHEP00002_00-CHEPINSTALLER001.pkg
+            '
+          test -s IV0000-CHEP00002_00-CHEPINSTALLER001.pkg
+          if [ "$DIAGNOSTIC_ONLY" = "1" ]; then
+            JBC_CHECK=forbidden
+          else
+            JBC_CHECK=required
+          fi
+          python3 ../verify_ps4_pkg.py \
+            --pkg IV0000-CHEP00002_00-CHEPINSTALLER001.pkg \
+            --gp4 pkg.gp4 --sfo sce_sys/param.sfo \
+            --title-id CHEP00002 --content-id IV0000-CHEP00002_00-CHEPINSTALLER001 \
+            --jbc "$JBC_CHECK"
+          if [ "$DIAGNOSTIC_ONLY" = "1" ]; then
+            ! grep -q 'libjbc.sprx' pkg.gp4 || { echo 'ERROR: JBC in diagnostic PKG manifest'; exit 1; }
+            OUT=ChepGame-Installer-PS4-v0.3.3-DIAGNOSTIC.pkg
+          else
+            grep -q 'libjbc.sprx' pkg.gp4 || { echo 'ERROR: JBC missing from install PKG manifest'; exit 1; }
+            OUT=ChepGame-Installer-PS4-v0.3.3.pkg
+          fi
+          cp IV0000-CHEP00002_00-CHEPINSTALLER001.pkg "../$OUT"
+          (cd .. && sha256sum "$OUT" > "$OUT.sha256")
+          echo "Generated $OUT" >> "$GITHUB_STEP_SUMMARY"
+      - name: Upload standalone installer PKG
+        uses: actions/upload-artifact@v4
+        with:
+          name: CHEPGAME-NET-Installer-PS4-v0.3.3-${{ inputs.diagnostic_without_jbc && 'DIAGNOSTIC' || 'JBC' }}
+          path: |
+            ChepGame-Installer-PS4-v0.3.3*.pkg
+            ChepGame-Installer-PS4-v0.3.3*.pkg.sha256
+          if-no-files-found: error
+      - name: Upload build diagnostics on failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: chepgame-installer-build-diagnostics
+          path: |
+            ChepGame-Installer/pkg.gp4
+            ChepGame-Installer/sce_sys/param.sfo
+            ChepGame-Installer/Makefile
+          if-no-files-found: ignore
