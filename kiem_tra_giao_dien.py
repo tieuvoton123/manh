@@ -17,10 +17,19 @@ assert (root/'assets/noto_sans.ttf').is_file() and (root/'assets/noto_symbols2.t
 errors=[]
 for term in ['BRAND OK','TRIANGLE REFRESH','X DOWNLOAD','NO ENABLED PACKAGES','X   VỀ PS4 ĐỂ CÀI']:
     if term in main+url:errors.append('Còn chuỗi cũ: '+term)
-for term in ['v0.44','Tốc độ:', 'Còn lại:', 'Đã tải:', 'fit_text',  'JobBatoInstall','chepgame_active_tab','tab_status[3]','JobRemoteInstall','submit_remote_install','Thư viện','Làm mới','CHEPGAME.NET']:
+for term in ['Tốc độ:', 'Còn lại:', 'Đã tải:', 'fit_text', 'JobBatoInstall', 'chepgame_active_tab', 'tab_status[3]', 'JobRemoteInstall', 'submit_remote_install', 'Thư viện', 'Làm mới', 'CHEPGAME.NET']:
     if term not in main+url:errors.append('Thiếu: '+term)
-for term in ['0.44','-lSceBgft','-lSceAppInstUtil']:
+for term in ['-lSceBgft', '-lSceAppInstUtil']:
     if term not in mk:errors.append('Makefile thiếu: '+term)
+# UI and package version must agree with this release. Checking an obsolete
+# version literal (v0.44 / 0.44) incorrectly rejected v0.4.5 before compilation.
+expected_version = '0.45'
+if not re.search(r'\bBY SUPER MANH\s+v' + re.escape(expected_version) + r'\b', main + url):
+    errors.append('UI thiếu phiên bản v' + expected_version)
+make_version = re.search(r'(?m)^\s*VERSION\s*:?=\s*([^\s#]+)', mk)
+if not make_version or make_version.group(1) != expected_version:
+    errors.append('Makefile VERSION phải là ' + expected_version +
+                  ' (hiện tại: ' + (make_version.group(1) if make_version else 'không tìm thấy') + ')')
 # FontTools unicode coverage is independently tested against both bundled open fonts.
 if 'assets/noto_sans.ttf' not in mk or 'assets/noto_symbols2.ttf' not in mk:
     errors.append('Chưa đóng gói font Unicode dự phòng')
@@ -35,7 +44,6 @@ if 'int main(int, char**)' in main and 'bgft_poll_id' not in main:
 if errors:
     print('\n'.join(errors),file=sys.stderr)
     sys.exit(1)
-print('Giao diện tiếng Việt OK: bố cục cột tách riêng, tốc độ tải, ETA, Sony TTF + Noto Sans, không còn BRAND OK.')
 
 # The download-only Store must not advertise BGFT and must verify PKGs.
 if 'if (false && remote_install' not in main or 'magic[0]==0x7f' not in main:
@@ -53,3 +61,5 @@ for value in ('ensure_writable_dir(', 'FALLBACK_DIR', 'DIR_BOTH_FAILED', 'existi
     if value not in main: raise SystemExit('v0.4.4 missing: '+value)
 assert (src/'chepgame_download_fs.hpp').is_file()
 assert 'if(errno!=ENOENT)' not in main
+
+print('Store v0.4.5: UI VERSION v0.45, Makefile VERSION 0.45, font, download, BGFT source checks OK.')
