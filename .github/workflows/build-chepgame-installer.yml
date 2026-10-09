@@ -61,6 +61,17 @@ jobs:
           chmod +x "$TOOLCHAIN_ROOT"/bin/linux/*
           test -x "$TOOLCHAIN_ROOT/bin/linux/PkgTool.Core"
           echo "TOOLCHAIN_ROOT=$TOOLCHAIN_ROOT" >> "$GITHUB_ENV"
+      - name: Verify SDL2 platform link dependencies in OpenOrbis SDK
+        run: |
+          set -euo pipefail
+          # libSDL2.a references PS4 video, audio and controller syscalls.
+          for lib in SDL2 SceVideoOut SceAudioOut ScePad; do
+            if [[ ! -f "$TOOLCHAIN_ROOT/lib/lib${lib}.a" && ! -f "$TOOLCHAIN_ROOT/lib/lib${lib}.so" ]]; then
+              echo "::error::OpenOrbis SDK missing lib${lib} (.a/.so) in $TOOLCHAIN_ROOT/lib" >&2
+              exit 1
+            fi
+          done
+          make -s --eval 'show-link-libs:;@echo $(LIBS)' show-link-libs
       - name: Check native C++ with real OpenOrbis SDK
         run: |
           set -euo pipefail
