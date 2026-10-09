@@ -1,0 +1,36 @@
+ChepGame Store v0.4.5 / Installer v0.3.3 — BUILD GUARD recheck (2026-10-10)
+
+WHAT WAS ACTUALLY RUN IN THIS ENVIRONMENT
+- Installer: 36/36 Python/C++ source tests PASS (g++ host stubs for PS4 APIs).
+- Store: 24/24 Python/C++ source tests PASS, including 6 new post-build validator tests.
+  Note: a temporary, fake stb_truetype.h was used ONLY for host-side unit syntax/pipeline tests.
+  That fake header was REMOVED before this ZIP was created. It is NOT suitable for a PS4 build.
+  GitHub Actions fetches the real upstream header with a pinned Git blob hash.
+- Native Store HDD/fs probe and transfer-meter tests compiled and executed.
+- Installer make variables/GP4 manifest selection checked for both install and diagnostic modes.
+- GitHub Actions YAML parsed successfully. ZIP structure / CRC is also verified.
+- Static PS4 PKG post-build verifier tests PASS: rejects bad magic, incorrect content ID,
+  missing assets/module, empty SFO, and inclusion of JBC in diagnostic mode.
+
+ADDITIONAL PRODUCTION GATE
+- GitHub Actions now runs verify_ps4_pkg.py on the produced .pkg and the associated
+  pkg.gp4 and param.sfo BEFORE uploading the artifact.
+- Rejects missing, empty or suspiciously small PKG, wrong PS4 PKG magic/content ID,
+  zero file count, missing GP4 entries, missing JBC in install mode, present JBC in diagnostic mode.
+
+WHAT HAS NOT BEEN VERIFIED
+- Full OpenOrbis/LLVM native compile, linking or PKG packaging: SDK unavailable locally.
+- Download of external dependencies (stb/OpenOrbis/JBC): this container has no internet access.
+- Real PS4 startup, HTTP download, /data/pkg permissions, JBC load, BGFT install: no console.
+- PKG structural validation alone cannot prove a package boots or installs successfully.
+
+INSTALL INSTRUCTIONS
+1. Replace/update the source files in your GitHub repository with the update ZIP contents,
+   or replace entire repository with full-source ZIP, keeping your own catalog config.
+2. Open GitHub Actions. Build Store and Installer independently. Keep diagnostic_without_jbc=false
+   for the actual Installer (diagnostic builds cannot install PKGs).
+3. A successful Actions run must end with verify_ps4_pkg.py saying STRUCTURE_OK and upload .pkg + .sha256.
+4. Test on jailbroken PS4 with an authorized small homebrew .pkg. Check /data/pkg and
+   /data/ChepGameStore/downloads and logs from both apps. Do not delete existing files.
+
+These ZIPs contain source and build guard, NOT ready-made PS4 PKGs.

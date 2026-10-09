@@ -1,0 +1,7 @@
+Embedded bitmap glyphs: rasterized Noto Sans glyphs under SIL Open Font License 1.1.
+The font file itself is NOT included. See NOTO_LICENSE.txt for license.
+Application code: original ChepGame Installer glue; uses public OpenOrbis BGFT/AppInstUtil headers.
+References and approach inspired by PS4 Internal PKG Installer (0x199) and flatz remote installer.
+No source code or binary from Sony, GoldHEN, GameBaTo or LightningMods is bundled.
+Third party JBC module NOT included in source ZIP: pinned upstream fetch at build time or user-provided compatible authorized module.
+The existing ChepGame Store is separate and unmodified.

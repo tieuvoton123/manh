@@ -1,0 +1,18 @@
+{
+  "schema_version": 1,
+  "generated_at": "2026-10-09T00:00:00Z",
+  "items": [
+    {
+      "id": "my-homebrew-app",
+      "name": "My Homebrew App",
+      "title_id": "HBAP00001",
+      "type": "app",
+      "version": "1.00",
+      "pkg_url": "https://your-domain.example/files/your-authorized-homebrew.pkg",
+      "size_bytes": 0,
+      "sha256": "",
+      "enabled": false,
+      "notes": "Dien URL PKG hop le va bat enabled sau khi kiem tra"
+    }
+  ]
+}
