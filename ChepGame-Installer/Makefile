@@ -12,8 +12,10 @@ CDIR       := macos
 endif
 CXX        := clang++
 LD         := ld.lld
+# OpenOrbis SDL2 is a static archive and needs the PS4 platform stubs.
+# Keep these AFTER -lSDL2 so ld.lld can resolve SDL_ps4video/audio/joystick.
 LIBS := -lc -lkernel -lc++ -lSceUserService -lSceSysmodule -lSceAppInstUtil -lSceBgft \
-        -lSceSystemService -lSDL2
+        -lSceSystemService -lSDL2 -lSceVideoOut -lSceAudioOut -lScePad
 CXXFLAGS := --target=x86_64-pc-freebsd12-elf -fPIC -funwind-tables -c -DORBIS -D_GNU_SOURCE \
             -isysroot $(TOOLCHAIN) -isystem $(TOOLCHAIN)/include \
             -std=c++11 -isystem $(TOOLCHAIN)/include/c++/v1 -I src
