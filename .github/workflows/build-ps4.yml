@@ -33,6 +33,8 @@ jobs:
           python3 ChepGameStore-PS4/scripts/validate_catalog.py ChepGameStore-PS4/catalog/catalog.json
           test -f ChepGameStore-PS4/LICENSE
           python3 kiem_tra_giao_dien.py ChepGameStore-PS4
+      - name: Verify v0.4.5 UI and Makefile version guard (regression tests)
+        run: python3 -m unittest tests.test_ui_build_guard -v
       - name: Install font coverage test helper
         run: python3 -m pip install --disable-pip-version-check fonttools==4.60.1
       - name: Test optimized downloader, unicode font and safe header fetch
